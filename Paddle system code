@@ -1,0 +1,214 @@
+//Import stuff
+#include <Wire.h>
+#include <Servo.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <utility/imumaths.h>
+
+/*
+
+ZONE A (110 to 139):  Open S1(30deg), Open S3,  Open S2
+ZONE B (139 to 167):  Open S3(30deg), Open S1, Open S2
+ZONE C (Rest Upper):  Open S1, S2, S3 (When deg range: >167 or <-80)
+ZONE D (Rest Lower):  Open S2, S3 (When deg range: -80 to 110)
+
+*/
+
+// Components
+Servo servo1;
+Servo servo2;
+Servo servo3;
+Adafruit_BNO055 bno = Adafruit_BNO055(55);
+
+// Elegoo Uno R3 pin connections
+const int PIN_SERVO_1 = 9;
+const int PIN_SERVO_2 = 10;
+const int PIN_SERVO_3 = 11;
+
+// Paddle closed/open positions
+const int S1_CLOSED = 84; 
+const int S2_CLOSED = 79; 
+const int S3_CLOSED = 86; 
+
+const int S1_EXTEND = 0;   
+const int S2_EXTEND = 128; 
+const int S3_EXTEND = 4;   
+
+// Partial opening degrees(30 from closed)
+const int S1_PARTIAL = 53; // 83 - 30
+const int S3_PARTIAL = 50; // 80 - 30
+
+// Time it takes for the servos to open
+const int MOVE_DELAY = 22; 
+
+void setup() {
+  Serial.begin(9600);
+
+  if (!bno.begin()) {
+    Serial.println("BNO055 not connected correctly");
+    while (1);
+  }
+  bno.setExtCrystalUse(true);
+
+  Serial.println("Setting servos to closed positions");
+  
+  // Attach temporarily to set positions
+  servo1.attach(PIN_SERVO_1, 500, 2500);
+  servo2.attach(PIN_SERVO_2, 500, 2500);
+  servo3.attach(PIN_SERVO_3, 500, 2500);
+  
+  closeAllPaddles();
+  
+  // Detach to wait
+  servo1.detach();
+  servo2.detach();
+  servo3.detach();
+  
+  Serial.println("Ready, waiting for 20 seconds");
+  delay(2000);
+}
+
+void loop() {
+
+  // STEP 1: Detect landing angle
+  float roll = getRocketRoll();
+  Serial.print("\n[STATUS] Landed Roll: ");
+  Serial.println(roll);
+
+  // Attach servos
+  servo1.attach(PIN_SERVO_1, 500, 2500);
+  servo2.attach(PIN_SERVO_2, 500, 2500);
+  servo3.attach(PIN_SERVO_3, 500, 2500);
+
+  //If zone A(110 to 139, includes 120)
+  if (roll >= 110 && roll <= 139) {
+    Serial.println("Landed on Zone A");
+    Serial.println("Open S1(30deg), Open S3,  Open S2");
+    
+    slowMove(servo1, S1_PARTIAL); // open S1 30 deg
+    slowMove(servo3, S3_EXTEND);  // Open S3 fully
+    slowMove(servo2, S2_EXTEND);  // Open S2 fully
+  }
+  
+  //If zone B(139 to 167, includes 150)
+  else if (roll > 139 && roll <= 167) {
+    Serial.println("Landed on Zone B");
+    Serial.println("Open S3(30deg), Open S1, Open S2");
+    
+    slowMove(servo3, S3_PARTIAL); // Lift S3 30 deg
+    slowMove(servo1, S1_EXTEND);  // Open S1 fully
+    slowMove(servo2, S2_EXTEND);  // Open S2 fully
+  }
+
+  //If Zone C:(> 167 OR < -80)
+  else if (roll > 167 || roll < -80) {
+    Serial.println("Landed on Zone C(upper side)");
+    Serial.println("Open S1, S2, S3");
+    
+    slowMove(servo1, S1_EXTEND);
+    slowMove(servo2, S2_EXTEND);
+    slowMove(servo3, S3_EXTEND);
+  }
+
+  //If Zone D(-80 to 110)
+  else {
+    Serial.println("Landed on Zone D(lower side)");
+    Serial.println("Open S2, S3");
+    
+    slowMove(servo2, S2_EXTEND);
+    slowMove(servo3, S3_EXTEND);
+  }
+
+  //STEP 2: check if within drill zone
+  Serial.println("Checking for drill zone");
+  
+  // Waiting for physics to settle before reading sensor data
+  delay(1500); 
+  
+  float newRoll = getRocketRoll();
+  Serial.print("Current Roll data");
+  Serial.println(newRoll);
+
+  // Target: -10 to 10 degrees
+  if (newRoll >= -10 && newRoll <= 10) {
+    Serial.println("Within Drill Zone");
+    Serial.println("Holding position for 10 seconds");
+    
+    // Detach servos
+    servo1.detach();
+    servo2.detach();
+    servo3.detach();
+    
+    //Wait 10 seconds
+    delay(10000); 
+
+    //Close the paddles
+    Serial.println("Closing paddles");
+    closeAllPaddles(); 
+    
+    Serial.println("Waiting 20 seconds to restart");
+    servo1.detach();
+    servo2.detach();
+    servo3.detach();
+    
+    //Wiat 20 seconds
+    delay(20000);
+  } 
+
+  else {
+    // If not in drill zone
+    Serial.println("Not in Drill Zone");
+    Serial.println("Closing all paddles and retrying");
+    
+    closeAllPaddles();
+    
+    servo1.detach();
+    servo2.detach();
+    servo3.detach();
+    
+    //wait 1 second
+    delay(1000); 
+  }
+}
+
+// HELPER FUNCTIONS
+
+//get roll data
+float getRocketRoll() {
+  sensors_event_t event;
+  bno.getEvent(&event);
+  float rawAngle = event.orientation.z; 
+  if (rawAngle > 180) rawAngle -= 360;
+  return rawAngle;
+}
+
+//Move the servos at certain speed
+void slowMove(Servo &s, int target) {
+  int currentPos = s.read();
+  
+  if (!s.attached()) s.attach(9); //Ensure servos are attached
+
+  if (currentPos < target) {
+    for (int i = currentPos; i <= target; i++) {
+      s.write(i);
+      delay(MOVE_DELAY);
+    }
+  } else {
+    for (int i = currentPos; i >= target; i--) {
+      s.write(i);
+      delay(MOVE_DELAY);
+    }
+  }
+}
+
+//move paddles to closed position
+void closeAllPaddles() {
+  if(!servo1.attached()) servo1.attach(PIN_SERVO_1);
+  if(!servo2.attached()) servo2.attach(PIN_SERVO_2);
+  if(!servo3.attached()) servo3.attach(PIN_SERVO_3);
+
+  Serial.println("Retracting paddles");
+  slowMove(servo1, S1_CLOSED);
+  slowMove(servo2, S2_CLOSED);
+  slowMove(servo3, S3_CLOSED);
+}
