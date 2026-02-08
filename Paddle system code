@@ -26,13 +26,13 @@ const int PIN_SERVO_2 = 10;
 const int PIN_SERVO_3 = 11;
 
 // Paddle closed/open positions
-const int S1_CLOSED = 84; 
-const int S2_CLOSED = 79; 
-const int S3_CLOSED = 86; 
+const int S1_CLOSED = 83; 
+const int S2_CLOSED = 71; 
+const int S3_CLOSED = 80; 
 
 const int S1_EXTEND = 0;   
-const int S2_EXTEND = 128; 
-const int S3_EXTEND = 4;   
+const int S2_EXTEND = 117; 
+const int S3_EXTEND = 16;    
 
 // Partial opening degrees(30 from closed)
 const int S1_PARTIAL = 53; // 83 - 30
